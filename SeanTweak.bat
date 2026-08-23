@@ -1,6 +1,8 @@
 @echo off
 chcp 65001 >nul
-title TweakSean
+title Sean Tweak
+color 0B
+mode con: cols=110 lines=45
 cd /d "%~dp0"
 
 if not exist "%~dp0Optimisation-Windows.ps1" (
@@ -13,10 +15,49 @@ if not exist "%~dp0Optimisation-Windows.ps1" (
 fltmc >nul 2>&1
 if %errorlevel% equ 0 goto run
 
-echo Demande des droits administrateur...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$q=[char]34; Start-Process -FilePath $q$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe$q -Verb RunAs -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File ' + $q + '%~dp0Optimisation-Windows.ps1' + $q)"
-exit /b
+cls
+echo.
+echo   ███████╗███████╗ █████╗ ███╗   ██╗    ████████╗██╗    ██╗███████╗ █████╗ ██╗  ██╗
+echo   ██╔════╝██╔════╝██╔══██╗████╗  ██║    ╚══██╔══╝██║    ██║██╔════╝██╔══██╗██║ ██╔╝
+echo   ███████╗█████╗  ███████║██╔██╗ ██║       ██║   ██║ █╗ ██║█████╗  ███████║█████╔╝ 
+echo   ╚════██║██╔══╝  ██╔══██║██║╚██╗██║       ██║   ██║███╗██║██╔══╝  ██╔══██║██╔═██╗ 
+echo   ███████║███████╗██║  ██║██║ ╚████║       ██║   ╚███╔███╔╝███████╗██║  ██║██║  ██╗
+echo   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝       ╚═╝    ╚══╝╚══╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
+echo.
+echo   optimisation windows                                                        v2.0
+echo.
+echo   ────────────────────────────────────────────────────────────────────────────────
+echo.
+echo     Ce script necessite les droits administrateur.
+echo.
+echo     •  Clic droit sur SeanTweak.bat
+echo     •  Selectionnez "Executer en tant qu'administrateur"
+echo.
+echo   ────────────────────────────────────────────────────────────────────────────────
+echo.
+pause
+exit /b 1
 
 :run
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Optimisation-Windows.ps1"
+cls
+color 0B
+mode con: cols=110 lines=45
+echo.
+echo   ███████╗███████╗ █████╗ ███╗   ██╗    ████████╗██╗    ██╗███████╗ █████╗ ██╗  ██╗
+echo   ██╔════╝██╔════╝██╔══██╗████╗  ██║    ╚══██╔══╝██║    ██║██╔════╝██╔══██╗██║ ██╔╝
+echo   ███████╗█████╗  ███████║██╔██╗ ██║       ██║   ██║ █╗ ██║█████╗  ███████║█████╔╝ 
+echo   ╚════██║██╔══╝  ██╔══██║██║╚██╗██║       ██║   ██║███╗██║██╔══╝  ██╔══██║██╔═██╗ 
+echo   ███████║███████╗██║  ██║██║ ╚████║       ██║   ╚███╔███╔╝███████╗██║  ██║██║  ██╗
+echo   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝       ╚═╝    ╚══╝╚══╝ ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
+echo.
+echo   optimisation windows                                                        v2.0
+echo.
+
+:: Utilise PowerShell 7 (pwsh) si disponible, sinon retombe sur Windows PowerShell 5.1
+where pwsh >nul 2>&1
+if %errorlevel% equ 0 (
+    pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0Optimisation-Windows.ps1"
+) else (
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Optimisation-Windows.ps1"
+)
 if %errorlevel% neq 0 pause
