@@ -131,6 +131,12 @@ function Visible-Length([string]$s) {
     $script:EscRx.Replace($s, '').Length
 }
 
+function Strip-Ansi([string]$s) {
+    if ([string]::IsNullOrEmpty($s)) { return '' }
+    if ($s.IndexOf($script:EscCh) -lt 0) { return $s }
+    $script:EscRx.Replace($s, '')
+}
+
 function Pad-To([string]$s, [int]$width) {
     $len = Visible-Length $s
     if ($len -ge $width) { return $s }
@@ -167,6 +173,31 @@ function Write-Log([string]$msg) {
     Add-Content -Path $script:LogPath -Value $line -Encoding UTF8 -ErrorAction SilentlyContinue
 }
 
+# Etiquette de l'operation en cours. Elle est recopiee dans chaque entree du
+# journal : c'est ce qui permet ensuite de restaurer UN reglage precis au lieu
+# de tout annuler en bloc.
+$script:CurrentTweak = 'Divers'
+
+function Add-Journal([hashtable]$Entry) {
+    $Entry['When']  = (Get-Date -Format 'yyyy-MM-dd HH:mm')
+    $Entry['Tweak'] = $script:CurrentTweak
+    [void]$script:Journal.Add([pscustomobject]$Entry)
+}
+
+# Reglages deja appliques lors d'une session precedente : label -> date.
+# Sert a afficher un marqueur « applique » dans la liste.
+$script:AppliedBefore = @{}
+function Read-AppliedBefore {
+    $script:AppliedBefore = @{}
+    if (-not (Test-Path $script:JournalPath)) { return }
+    try {
+        foreach ($e in @(Get-Content $script:JournalPath -Raw | ConvertFrom-Json)) {
+            if ($e.Tweak) { $script:AppliedBefore[$e.Tweak] = $e.When }
+        }
+    } catch { }
+}
+Read-AppliedBefore
+
 function Set-Reg {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -194,10 +225,10 @@ function Set-Reg {
 
     # journalise seulement ce qui a reellement ete ecrit, sinon l'annulation
     # tenterait de restaurer des valeurs jamais modifiees
-    [void]$script:Journal.Add([pscustomobject]@{
+    Add-Journal @{
         Kind = 'reg'; Path = $Path; Name = $Name
         Existed = $existed; Old = $old; New = $Value; Type = $Type
-    })
+    }
     Write-Log "REG $Path\$Name = $Value (avant: $(if($existed){$old}else{'<absent>'}))"
 }
 
@@ -221,9 +252,9 @@ function Set-Svc {
         return
     }
 
-    [void]$script:Journal.Add([pscustomobject]@{
+    Add-Journal @{
         Kind = 'svc'; Name = $Name; Old = $old; New = $StartupType
-    })
+    }
     Write-Log "SVC $Name -> $StartupType (avant: $old)"
 }
 
@@ -235,6 +266,9 @@ function Save-Journal {
     }
     $all = @($existing) + @($script:Journal)
     $all | ConvertTo-Json -Depth 5 | Set-Content -Path $script:JournalPath -Encoding UTF8
+    # sans ce Clear, un second Save-Journal dans la meme session reecrirait les
+    # memes entrees une deuxieme fois dans le fichier
+    $script:Journal.Clear()
 }
 
 # ============================================================================
@@ -361,8 +395,8 @@ $script:Tweaks = @(
             $k = 'HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32'
             New-Item -Path $k -Force | Out-Null
             Set-Item -Path $k -Value '' -Force
-            [void]$script:Journal.Add([pscustomobject]@{
-                Kind = 'ctxmenu'; Path = 'HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}' })
+            Add-Journal @{
+                Kind = 'ctxmenu'; Path = 'HKCU:\Software\Classes\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}' }
        } }
 
     @{ Cat = 'Interface & Explorateur'; Risk = 0
@@ -499,7 +533,9 @@ Get-ChildItem "$env:SystemRoot\SoftwareDistribution\Download" -Force |
     Remove-Item -Recurse -Force
 Start-Service wuauserv, bits -WarningAction SilentlyContinue
 
-Delete-DeliveryOptimizationCache -Force *>$null
+if (Get-Command Delete-DeliveryOptimizationCache -ErrorAction SilentlyContinue) {
+    Delete-DeliveryOptimizationCache -Force *>$null
+}
 
 $freed = [math]::Round((((Get-PSDrive C).Free - $freedBefore) / 1GB), 2)
 "$(Get-Date -f 'yyyy-MM-dd HH:mm')  nettoyage termine, $freed Go liberes" |
@@ -507,24 +543,26 @@ $freed = [math]::Round((((Get-PSDrive C).Free - $freedBefore) / 1GB), 2)
 '@
 
 function Invoke-Cleanup {
-    $script = Join-Path $script:DataDir 'cleanup.ps1'
-    Set-Content -Path $script -Value $script:CleanupBody -Encoding UTF8
+    # $script comme nom de variable prete a confusion avec la portee $script: :
+    # on le renomme pour que le code reste lisible
+    $cleanup = Join-Path $script:DataDir 'cleanup.ps1'
+    Set-Content -Path $cleanup -Value $script:CleanupBody -Encoding UTF8
     $p = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -Wait -PassThru `
-        -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$script`""
+        -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$cleanup`""
     if ($p.ExitCode -ne 0) {
         [void]$script:StepErrors.Add("nettoyage : code de sortie $($p.ExitCode)")
     }
 }
 
 function Register-CleanupTask {
-    $script = Join-Path $script:DataDir 'cleanup.ps1'
-    Set-Content -Path $script -Value $script:CleanupBody -Encoding UTF8
+    $cleanup = Join-Path $script:DataDir 'cleanup.ps1'
+    Set-Content -Path $cleanup -Value $script:CleanupBody -Encoding UTF8
 
     $name = 'TweakSean - Nettoyage hebdomadaire'
     Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
 
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-        -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`""
+        -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$cleanup`""
     $trigger   = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At '12:00'
     $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable `
@@ -535,7 +573,7 @@ function Register-CleanupTask {
         -Principal $principal -Settings $settings `
         -Description 'Nettoyage des fichiers temporaires (TweakSean)' | Out-Null
 
-    [void]$script:Journal.Add([pscustomobject]@{ Kind = 'task'; Name = $name })
+    Add-Journal @{ Kind = 'task'; Name = $name }
 }
 
 # ============================================================================
@@ -587,10 +625,12 @@ function Build-Logo {
             $ch = $l[$i]
             if ($ch -eq ' ') { [void]$sb.Append(' '); continue }
 
-            $t = $i / ($n - 1)
-            $r = 56  + 83  * $t
-            $g = 208 - 84  * $t
-            $b = 232 + 14  * $t
+            # $t masquerait le theme $T (PowerShell ignore la casse) et
+            # $T.Reset plus bas renverrait alors une chaine vide
+            $ratio = $i / ($n - 1)
+            $r = 56  + 83  * $ratio
+            $g = 208 - 84  * $ratio
+            $b = 232 + 14  * $ratio
 
             if ($Phase -ge 0) {
                 $d = [Math]::Abs($i - $band)
@@ -677,8 +717,30 @@ function Get-RiskDot([int]$risk) {
 }
 
 function Get-VisibleIndexes {
-    param($Rows)
+    param($Rows, [string]$Filter = '')
     $vis = New-Object System.Collections.ArrayList
+
+    if ($Filter) {
+        # en mode filtre on ignore les sections repliees : on montre tout ce qui
+        # correspond, et l'en-tete seulement s'il lui reste au moins une ligne
+        $f = $Filter.ToLower()
+        for ($i = 0; $i -lt $Rows.Count; $i++) {
+            $r = $Rows[$i]
+            if ($r.Type -eq 'Header') {
+                $keep = $false
+                for ($j = $i + 1; $j -lt $Rows.Count -and $Rows[$j].Type -ne 'Header'; $j++) {
+                    $hay = (Strip-Ansi $Rows[$j].Text) + ' ' + (Strip-Ansi $Rows[$j].Desc)
+                    if ($hay.ToLower().Contains($f)) { $keep = $true; break }
+                }
+                if ($keep) { [void]$vis.Add($i) }
+            } else {
+                $hay = (Strip-Ansi $r.Text) + ' ' + (Strip-Ansi $r.Desc)
+                if ($hay.ToLower().Contains($f)) { [void]$vis.Add($i) }
+            }
+        }
+        return , $vis
+    }
+
     $hdr = $null
     for ($i = 0; $i -lt $Rows.Count; $i++) {
         if ($Rows[$i].Type -eq 'Header') { $hdr = $Rows[$i]; [void]$vis.Add($i) }
@@ -738,7 +800,9 @@ function Show-CheckList {
     while ($sel -lt $Rows.Count -and $Rows[$sel].Type -ne 'Item') { $sel++ }
     if ($sel -ge $Rows.Count) { $sel = 0 }
 
-    $top = 0
+    $top        = 0
+    $filter     = ''
+    $filtering  = $false
     $prevCursor = $true
     try { $prevCursor = [Console]::CursorVisible } catch { }
     [Console]::CursorVisible = $false
@@ -773,7 +837,7 @@ function Show-CheckList {
             $CW = $W - (2 * $MARGIN)          # largeur utile du contenu
             $pad = ' ' * $MARGIN
 
-            $vis = Get-VisibleIndexes $Rows
+            $vis = Get-VisibleIndexes $Rows $filter
             if ($vis.IndexOf($sel) -lt 0 -and $vis.Count -gt 0) { $sel = $vis[0] }
 
             # ---------- en-tete ----------
@@ -831,11 +895,17 @@ function Show-CheckList {
                        else { $T.Dim }
 
                 $left  = "$pad$bar  $box  $txt$($r.Text)$($T.Reset)"
-                $right = if ($null -ne $r.Risk -and $r.Risk -gt 0) { (Get-RiskDot $r.Risk) + ' ' } else { '' }
+                $right = ''
+                if ($r.Done) { $right += "$($T.Faint)appliqué$($T.Reset)   " }
+                if ($null -ne $r.Risk -and $r.Risk -gt 0) { $right += (Get-RiskDot $r.Risk) + ' ' }
                 $line  = Join-Sides $left $right ($W - 2)
 
                 if ($isSel) { $line = $T.SelBg + (Pad-To $line ($W - 2)) + $T.Reset }
                 [void]$render.Add(@{ Text = $line; Row = $idx })
+            }
+
+            if ($render.Count -eq 0) {
+                [void]$render.Add(@{ Text = "$pad$($T.Warn)aucun résultat pour « $filter »$($T.Reset)"; Row = -1 })
             }
 
             # ---------- pied ----------
@@ -855,13 +925,28 @@ function Show-CheckList {
             [void]$foot.Add("$pad$($T.Text)$($dl[0])$($T.Reset)")
             [void]$foot.Add("$pad$($T.Text)$(if ($dl.Count -gt 1) { $dl[1] } else { '' })$($T.Reset)")
             [void]$foot.Add('')
-            $keys = "$pad$($T.Faint)↑↓$($T.Reset) naviguer    " +
-                    "$($T.Faint)espace$($T.Reset) cocher    " +
-                    "$($T.Faint)←→$($T.Reset) replier    " +
-                    "$($T.Faint)T$($T.Reset) tout    " +
-                    "$($T.Faint)A$($T.Reset) $ApplyLabel    " +
-                    "$($T.Faint)Q$($T.Reset) quitter"
-            $count = if ($checked -gt 0) { "$($T.Cyan)$checked sélection(s)$($T.Reset)" } else { "$($T.Faint)aucune sélection$($T.Reset)" }
+            if ($filtering) {
+                $keys = "$pad$($T.Cyan)filtre :$($T.Reset) $($T.Text)$filter$($T.Reset)$($T.Accent)▌$($T.Reset)   " +
+                        "$($T.Faint)entrée$($T.Reset) valider   " +
+                        "$($T.Faint)échap$($T.Reset) effacer"
+            } elseif ($CW -ge 92) {
+                $keys = "$pad$($T.Faint)↑↓$($T.Reset) naviguer   " +
+                        "$($T.Faint)espace$($T.Reset) cocher   " +
+                        "$($T.Faint)←→$($T.Reset) replier   " +
+                        "$($T.Faint)/$($T.Reset) filtrer   " +
+                        "$($T.Faint)T$($T.Reset) tout   " +
+                        "$($T.Faint)A$($T.Reset) $ApplyLabel   " +
+                        "$($T.Faint)Q$($T.Reset) quitter"
+            } else {
+                $keys = "$pad$($T.Faint)↑↓$($T.Reset) naviguer   " +
+                        "$($T.Faint)espace$($T.Reset) cocher   " +
+                        "$($T.Faint)/$($T.Reset) filtrer   " +
+                        "$($T.Faint)A$($T.Reset) $ApplyLabel   " +
+                        "$($T.Faint)Q$($T.Reset) quitter"
+            }
+            $count = if ($filter -and -not $filtering) { "$($T.Cyan)filtre « $filter »$($T.Reset)" }
+                     elseif ($checked -gt 0) { "$($T.Cyan)$checked sélection(s)$($T.Reset)" }
+                     else { "$($T.Faint)aucune sélection$($T.Reset)" }
             [void]$foot.Add((Join-Sides $keys $count ($W - 2)))
             [void]$foot.Add('')
 
@@ -939,9 +1024,33 @@ function Show-CheckList {
                 $script:LastBlit = $null
                 continue
             }
+            $kn = [string]$key.Key
+
+            # ---------- saisie du filtre ----------
+            if ($filtering) {
+                if     ($kn -eq 'Enter')     { $filtering = $false }
+                elseif ($kn -eq 'Escape')    { $filtering = $false; $filter = '' }
+                elseif ($kn -eq 'Backspace') {
+                    if ($filter.Length -gt 0) { $filter = $filter.Substring(0, $filter.Length - 1) }
+                }
+                elseif ([int]$key.KeyChar -ge 32) { $filter += $key.KeyChar }
+                continue
+            }
+
+            # « / » sur clavier QWERTY, « : » sur la meme touche en AZERTY
+            if ($key.KeyChar -eq '/' -or $key.KeyChar -eq ':') { $filtering = $true; continue }
+
+            # aucune ligne visible (filtre trop restrictif) : seules les touches
+            # de sortie repondent, sinon le modulo plus bas diviserait par zero
+            if ($vis.Count -eq 0) {
+                if ($kn -eq 'Escape') { $filter = '' }
+                elseif ($kn -eq 'Q')  { return @{ Action = 'quit' } }
+                continue
+            }
+
             $p   = $vis.IndexOf($sel)
 
-            switch ([string]$key.Key) {
+            switch ($kn) {
                 'UpArrow'   { $sel = $vis[(($p - 1 + $vis.Count) % $vis.Count)] }
                 'DownArrow' { $sel = $vis[(($p + 1) % $vis.Count)] }
                 'PageUp'    { $sel = $vis[[Math]::Max(0, $p - 8)] }
@@ -992,9 +1101,42 @@ function Show-CheckList {
                     }
                 }
 
-                'A'      { return @{ Action = 'apply'; Rows = $Rows } }
+                'A' {
+                    # les reglages deconseilles ne partent jamais sans un accord explicite
+                    $risky = @($Rows | Where-Object {
+                        $_.Type -eq 'Item' -and $_.Checked -and $null -ne $_.Risk -and $_.Risk -ge 2 })
+
+                    if ($risky.Count -gt 0) {
+                        [Console]::CursorVisible = $true
+                        Clear-Host
+                        Write-Host ''
+                        Write-Host ("    " + $T.Bad + '▌' + $T.Reset + ' ' + $T.Bold + $T.Text +
+                                    'RÉGLAGES DÉCONSEILLÉS' + $T.Reset)
+                        Write-Host ''
+                        foreach ($x in $risky) {
+                            Write-Host ("      " + $T.Bad + '•' + $T.Reset + ' ' + $T.Text +
+                                        (Strip-Ansi $x.Text) + $T.Reset)
+                            foreach ($dl in (Wrap-Text (Strip-Ansi $x.Desc) 74)) {
+                                Write-Host ("        " + $T.Faint + $dl + $T.Reset)
+                            }
+                            Write-Host ''
+                        }
+                        Write-Host ("    " + $T.Text + 'Continuer quand même ? ' +
+                                    $T.Faint + '[o/N] ' + $T.Reset) -NoNewline
+                        $confirm = Read-Host
+                        [Console]::CursorVisible = $false
+                        Clear-Host
+                        $script:LastBlit = $null
+                        if ($confirm -notmatch '^[oOyY]') { continue }
+                    }
+                    return @{ Action = 'apply'; Rows = $Rows }
+                }
                 'Q'      { return @{ Action = 'quit' } }
-                'Escape' { return @{ Action = 'quit' } }
+                'Escape' {
+                    # echap efface d'abord le filtre, il ne quitte qu'ensuite
+                    if ($filter) { $filter = ''; continue }
+                    return @{ Action = 'quit' }
+                }
             }
         }
     } finally {
@@ -1039,18 +1181,24 @@ function Show-StartupManager {
         -ApplyLabel 'supprimer'
 
     if ($res.Action -ne 'apply') { return }
+    $script:CurrentTweak = 'Démarrage automatique'
     foreach ($r in $res.Rows) {
         if ($r.Type -eq 'Item' -and $r.Checked) {
             try {
-                [void]$script:Journal.Add([pscustomobject]@{
+                Add-Journal @{
                     Kind = 'reg'; Path = $r.Tag.Path; Name = $r.Tag.Name
                     Existed = $true; Old = $r.Desc; New = $null; Type = 'String'
-                })
+                }
                 Remove-ItemProperty -Path $r.Tag.Path -Name $r.Tag.Name -Force
                 Write-Log "STARTUP supprime: $($r.Tag.Name)"
             } catch { }
         }
     }
+    # sans ce Save-Journal, les suppressions n'etaient ecrites sur le disque que
+    # si l'utilisateur appliquait ensuite des tweaks : sinon, rien a annuler
+    Save-Journal
+    Read-AppliedBefore
+    $script:CurrentTweak = 'Divers'
 }
 
 function Show-AppManager {
@@ -1170,10 +1318,35 @@ function Show-ServiceManager {
         -ApplyLabel 'désactiver'
 
     if ($res.Action -ne 'apply') { return }
+    $script:CurrentTweak = 'Services Windows'
     foreach ($r in $res.Rows) {
         if ($r.Type -eq 'Item' -and $r.Checked) {
             try { Set-Svc $r.Tag 'Disabled' } catch { }
         }
+    }
+    Save-Journal
+    Read-AppliedBefore
+    $script:CurrentTweak = 'Divers'
+}
+
+function Restore-Entry($e) {
+    switch ($e.Kind) {
+        'reg' {
+            if ($e.Existed) {
+                # le JSON rend les valeurs binaires sous forme de tableau d'entiers :
+                # sans ce cast, New-ItemProperty refuse la valeur
+                $val = $e.Old
+                if ($e.Type -eq 'Binary'      -and $null -ne $val) { $val = [byte[]]@($val) }
+                if ($e.Type -eq 'MultiString' -and $null -ne $val) { $val = [string[]]@($val) }
+                New-ItemProperty -Path $e.Path -Name $e.Name -Value $val `
+                    -PropertyType $e.Type -Force | Out-Null
+            } else {
+                Remove-ItemProperty -Path $e.Path -Name $e.Name -Force -ErrorAction SilentlyContinue
+            }
+        }
+        'svc'     { if ($e.Old) { Set-Service -Name $e.Name -StartupType ($e.Old -replace '^Auto$', 'Automatic') } }
+        'ctxmenu' { Remove-Item -Path $e.Path -Recurse -Force -ErrorAction SilentlyContinue }
+        'task'    { Unregister-ScheduledTask -TaskName $e.Name -Confirm:$false -ErrorAction SilentlyContinue }
     }
 }
 
@@ -1183,32 +1356,73 @@ function Show-Restore {
         Write-Host "`n  Aucune modification enregistrée." -ForegroundColor Yellow
         Read-Host "`n  Entrée pour revenir"; return
     }
-    $entries = @(Get-Content $script:JournalPath -Raw | ConvertFrom-Json)
-    Write-Host "`n  $($entries.Count) modification(s) enregistrée(s)." -ForegroundColor Cyan
-    $ans = Read-Host "  Tout restaurer ? (o/N)"
-    if ($ans -notmatch '^[oOyY]') { return }
 
-    $ok = 0
-    foreach ($e in $entries) {
-        try {
-            switch ($e.Kind) {
-                'reg' {
-                    if ($e.Existed) {
-                        New-ItemProperty -Path $e.Path -Name $e.Name -Value $e.Old `
-                            -PropertyType $e.Type -Force | Out-Null
-                    } else {
-                        Remove-ItemProperty -Path $e.Path -Name $e.Name -Force -ErrorAction SilentlyContinue
-                    }
-                }
-                'svc'  { if ($e.Old) { Set-Service -Name $e.Name -StartupType ($e.Old -replace '^Auto$', 'Automatic') } }
-                'ctxmenu' { Remove-Item -Path $e.Path -Recurse -Force -ErrorAction SilentlyContinue }
-                'task' { Unregister-ScheduledTask -TaskName $e.Name -Confirm:$false -ErrorAction SilentlyContinue }
-            }
-            $ok++
-        } catch { }
+    $entries = @(Get-Content $script:JournalPath -Raw | ConvertFrom-Json)
+    if ($entries.Count -eq 0) {
+        Write-Host "`n  Aucune modification enregistrée." -ForegroundColor Yellow
+        Read-Host "`n  Entrée pour revenir"; return
     }
-    Remove-Item $script:JournalPath -Force -ErrorAction SilentlyContinue
-    Write-Host "  $ok élément(s) restauré(s). Redémarre pour finaliser." -ForegroundColor Green
+
+    # regroupement par reglage et par date : on restaure ce que l'utilisateur
+    # choisit, au lieu du tout-ou-rien d'avant
+    $groups = $entries | Group-Object -Property {
+        $lbl  = if ($_.Tweak) { $_.Tweak } else { 'Session précédente' }
+        $date = if ($_.When)  { $_.When }  else { '' }
+        "$lbl|$date"
+    }
+
+    $rows = New-Object System.Collections.ArrayList
+    [void]$rows.Add([pscustomobject]@{ Type = 'Header'; Text = 'Modifications enregistrées' })
+    foreach ($g in ($groups | Sort-Object Name -Descending)) {
+        $parts = $g.Name -split '\|', 2
+        $when  = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { 'date inconnue' }
+        [void]$rows.Add([pscustomobject]@{
+            Type = 'Item'; Text = $parts[0]; Checked = $false; Risk = 0
+            Desc = "$($g.Count) modification(s) enregistrée(s) le $when."
+            Tag  = $g.Group
+        })
+    }
+
+    $res = Show-CheckList -Rows $rows -NoLogo `
+        -Title 'Annuler des modifications' `
+        -Subtitle "Coche ce que tu veux remettre dans son état d'origine, puis A." `
+        -ApplyLabel 'restaurer'
+
+    if ($res.Action -ne 'apply') { return }
+
+    $picked = New-Object System.Collections.ArrayList
+    foreach ($r in $res.Rows) {
+        if ($r.Type -eq 'Item' -and $r.Checked) {
+            foreach ($e in $r.Tag) { [void]$picked.Add($e) }
+        }
+    }
+    if ($picked.Count -eq 0) { return }
+
+    Clear-Host
+    Write-Host ''
+    Write-Host ("    " + $T.Accent + '▌' + $T.Reset + ' ' + $T.Bold + $T.Text + 'RESTAURATION' + $T.Reset)
+    Write-Host ''
+
+    # ordre inverse : si une meme cle a ete modifiee deux fois, c'est la valeur
+    # la plus ancienne qui doit etre ecrite en dernier
+    $ok = 0; $ko = 0
+    for ($i = $picked.Count - 1; $i -ge 0; $i--) {
+        try { Restore-Entry $picked[$i]; $ok++ }
+        catch { $ko++; Write-Log "RESTORE echec : $($_.Exception.Message)" }
+    }
+
+    $remaining = @($entries | Where-Object { $picked -notcontains $_ })
+    if ($remaining.Count -eq 0) {
+        Remove-Item $script:JournalPath -Force -ErrorAction SilentlyContinue
+    } else {
+        $remaining | ConvertTo-Json -Depth 5 | Set-Content -Path $script:JournalPath -Encoding UTF8
+    }
+    Read-AppliedBefore
+
+    Write-Host (Format-Step "$ok élément(s) restauré(s)" 'ok' $T.Ok)
+    if ($ko -gt 0) { Write-Host (Format-Step "$ko échec(s)" 'échec' $T.Bad) }
+    Write-Host ''
+    Write-Host ("    " + $T.Faint + 'Redémarre pour finaliser.' + $T.Reset)
     Read-Host "`n  Entrée pour revenir"
 }
 
@@ -1281,39 +1495,46 @@ function Invoke-Apply {
     $ok = 0; $partial = 0; $ko = 0
     $i  = 0
 
-    foreach ($t in $todo) {
+    # ATTENTION : ne pas nommer cette variable $t. PowerShell ne distingue pas
+    # la casse, donc $t masquerait le theme $T et tout l'ecran d'application
+    # s'afficherait sans couleur.
+    foreach ($tw in $todo) {
         $i++
         $script:StepErrors.Clear()
 
         # certains tweaks sont longs : on previent avant de lancer
-        $long = $t.Text -match 'intégrité|temporaires|réserve'
+        $long = $tw.Text -match 'intégrité|temporaires|réserve'
         $hint = if ($long) { 'en cours...' } else { 'en cours' }
-        Write-Host (Format-Step "$i. $($t.Text)" $hint $T.Dim) -NoNewline
+        Write-Host (Format-Step "$i. $($tw.Text)" $hint $T.Dim) -NoNewline
+
+        $script:CurrentTweak = $tw.Text
 
         try {
             # toutes les sorties parasites des cmdlets appelees sont avalees :
             # sans ca, un Write-Host interne casse l'alignement des colonnes
-            & $t.Do *>&1 | Out-Null
+            & $tw.Do *>&1 | Out-Null
 
             if ($script:StepErrors.Count -gt 0) {
-                Write-Host ("`r" + (Format-Step "$i. $($t.Text)" 'partiel' $T.Warn))
+                Write-Host ("`r" + (Format-Step "$i. $($tw.Text)" 'partiel' $T.Warn))
                 foreach ($e in $script:StepErrors) {
                     Write-Host ("      " + $T.Faint + $e + $T.Reset)
                 }
                 $partial++
             } else {
-                Write-Host ("`r" + (Format-Step "$i. $($t.Text)" 'ok' $T.Ok))
+                Write-Host ("`r" + (Format-Step "$i. $($tw.Text)" 'ok' $T.Ok))
                 $ok++
             }
         } catch {
-            Write-Host ("`r" + (Format-Step "$i. $($t.Text)" 'échec' $T.Bad))
+            Write-Host ("`r" + (Format-Step "$i. $($tw.Text)" 'échec' $T.Bad))
             Write-Host ("      " + $T.Faint + $_.Exception.Message + $T.Reset)
-            Write-Log "ERREUR [$($t.Text)] $($_.Exception.Message)"
+            Write-Log "ERREUR [$($tw.Text)] $($_.Exception.Message)"
             $ko++
         }
     }
 
     Save-Journal
+    Read-AppliedBefore
+    $script:CurrentTweak = 'Divers'
 
     # ---- resume ----
     Write-Host ''
@@ -1355,14 +1576,17 @@ function Invoke-Apply {
 function Build-MainRows {
     $rows = New-Object System.Collections.ArrayList
     $lastCat = $null
-    foreach ($t in $script:Tweaks) {
-        if ($t.Cat -ne $lastCat) {
-            [void]$rows.Add([pscustomobject]@{ Type = 'Header'; Text = $t.Cat })
-            $lastCat = $t.Cat
+    foreach ($tw in $script:Tweaks) {
+        if ($tw.Cat -ne $lastCat) {
+            [void]$rows.Add([pscustomobject]@{ Type = 'Header'; Text = $tw.Cat })
+            $lastCat = $tw.Cat
         }
+        $done = $script:AppliedBefore.ContainsKey($tw.Label)
+        $desc = if ($done) { "$($tw.Desc)   [déjà appliqué le $($script:AppliedBefore[$tw.Label])]" }
+                else       { $tw.Desc }
         [void]$rows.Add([pscustomobject]@{
-            Type = 'Item'; Text = $t.Label; Desc = $t.Desc
-            Checked = $false; Risk = $t.Risk; Group = $t.Group; Do = $t.Do
+            Type = 'Item'; Text = $tw.Label; Desc = $desc
+            Checked = $false; Risk = $tw.Risk; Group = $tw.Group; Do = $tw.Do; Done = $done
         })
     }
 
@@ -1396,7 +1620,9 @@ while ($true) {
     if ($res.Action -eq 'quit') { break }
     if ($res.Action -eq 'apply') {
         Invoke-Apply -Rows $res.Rows
-        foreach ($r in $rows) { if ($r.Type -eq 'Item') { $r.Checked = $false } }
+        # reconstruction : remet les cases a zero ET rafraichit les marqueurs
+        # « déjà appliqué »
+        $rows = Build-MainRows
     }
 }
 
