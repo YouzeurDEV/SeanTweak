@@ -34,7 +34,7 @@ if not exist "%~dp0Optimisation-Windows.ps1" (
     echo.
     echo   %DIM%Optimisation-Windows.ps1 est introuvable dans ce dossier.%R%
     echo   %DIM%Garde SeanTweak.bat et Optimisation-Windows.ps1 cote a cote,%R%
-    echo   %DIM%exactement comme dans l'archive telechargee.%R%
+    echo   %DIM%exactement comme dans l'archive téléchargée.%R%
     echo.
     echo   %FNT%Appuie sur une touche pour fermer.%R%%HID%
     pause >nul
@@ -53,11 +53,11 @@ echo   %FNT%--------------------------------------------------------------------
 echo.
 echo   %WRN%^|%R%  %TXT%Droits administrateur requis%R%
 echo.
-echo   %DIM%Sean Tweak ecrit dans le registre et modifie des services :%R%
-echo   %DIM%Windows n'autorise pas ces operations a un compte standard.%R%
+echo   %DIM%Sean Tweak écrit dans le registre et modifie des services :%R%
+echo   %DIM%Windows n'autorise pas ces opérations à un compte standard.%R%
 echo.
 echo   %CYA%^>%R%  %TXT%Une confirmation Windows va s'ouvrir.%R%
-echo   %FNT%   Accepte-la et Sean Tweak redemarre avec les droits necessaires.%R%
+echo   %FNT%   Accepte-la et Sean Tweak redémarre avec les droits nécessaires.%R%
 echo.%HID%
 
 rem  On eleve cmd.exe (signe par Microsoft) qui rappelle ce .bat, plutot que
@@ -72,12 +72,12 @@ if %errorlevel% neq 0 (
     echo   %ACC%%B%SEAN TWEAK%R%   %DIM%optimisation windows%R%                       %FNT%v2.0%R%
     echo   %FNT%--------------------------------------------------------------------%R%
     echo.
-    echo   %WRN%^|%R%  %TXT%Elevation refusee%R%
+    echo   %WRN%^|%R%  %TXT%Élévation refusée%R%
     echo.
-    echo   %OKC%   Aucune modification n'a ete faite sur ton systeme.%R%
+    echo   %OKC%   Aucune modification n'a été faite sur ton système.%R%
     echo.
     echo   %DIM%Relance SeanTweak.bat et accepte la confirmation Windows,%R%
-    echo   %DIM%ou fais un clic droit ^> "Executer en tant qu'administrateur".%R%
+    echo   %DIM%ou fais un clic droit ^> "Exécuter en tant qu'administrateur".%R%
     echo.
     echo   %FNT%Appuie sur une touche pour fermer.%R%%HID%
     pause >nul
@@ -91,7 +91,7 @@ mode con: cols=110 lines=45
 echo.
 echo   %ACC%%B%SEAN TWEAK%R%   %DIM%optimisation windows%R%                       %FNT%v2.0%R%
 echo.
-echo   %FNT%Demarrage...%R%%HID%
+echo   %FNT%Démarrage...%R%%HID%
 
 rem  PowerShell 7 (pwsh) si disponible, sinon Windows PowerShell 5.1
 where pwsh >nul 2>&1
@@ -106,7 +106,7 @@ set "CODE=%errorlevel%"
 echo %SHW%
 if not "%CODE%"=="0" (
     echo.
-    echo   %BAD%^|%R%  %TXT%Le script s'est termine avec le code %CODE%.%R%
+    echo   %BAD%^|%R%  %TXT%Le script s'est terminé avec le code %CODE%.%R%
     echo   %FNT%Journal : %%LOCALAPPDATA%%\TweakSean\tweaksean.log%R%
     echo.
     pause
