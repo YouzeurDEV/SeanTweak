@@ -35,9 +35,22 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
         Write-Host "Droits administrateur requis." -ForegroundColor Red
         exit 1
     }
+
+    # Un refus de l'UAC leve une exception. Sans ce try/catch, l'utilisateur
+    # recevait toute la pile d'erreur PowerShell en rouge au lieu d'un message.
     $me = $MyInvocation.MyCommand.Path
-    Start-Process -FilePath (Get-Process -Id $PID).Path -Verb RunAs `
-        -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$me`""
+    try {
+        Start-Process -FilePath (Get-Process -Id $PID).Path -Verb RunAs -ErrorAction Stop `
+            -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$me`""
+    } catch {
+        Write-Host ''
+        Write-Host '  Elevation refusee : Sean Tweak n''a rien modifie.' -ForegroundColor Yellow
+        Write-Host ''
+        Write-Host '  Pour reessayer, relance SeanTweak.bat et accepte la' -ForegroundColor DarkGray
+        Write-Host '  demande de confirmation de Windows.' -ForegroundColor DarkGray
+        Write-Host ''
+        Start-Sleep -Seconds 4
+    }
     exit
 }
 
