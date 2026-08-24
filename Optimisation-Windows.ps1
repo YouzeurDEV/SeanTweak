@@ -54,6 +54,15 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     exit
 }
 
+# Retire la marque « ce fichier vient d'Internet » posee par le navigateur sur
+# les fichiers de l'archive. Sans ca, Windows reaffiche son avertissement de
+# securite a chaque lancement. Necessite les droits admin : c'est fait ici,
+# juste apres l'elevation.
+try {
+    Get-ChildItem -Path $PSScriptRoot -File -ErrorAction Stop |
+        Unblock-File -ErrorAction SilentlyContinue
+} catch { }
+
 # ============================================================================
 #  1. CONSOLE : VT, taille, theme
 # ============================================================================

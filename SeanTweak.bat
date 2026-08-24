@@ -4,51 +4,89 @@ chcp 65001 >nul
 title Sean Tweak
 cd /d "%~dp0"
 
-rem  Ce fichier est volontairement en ASCII pur : les caracteres de dessin
-rem  Unicode combines a "chcp 65001" font perdre le fil a l'analyseur de cmd,
-rem  qui se met alors a executer les lignes du logo comme des commandes.
-rem  Le logo anime est affiche par le script PowerShell.
+rem  ASCII pur volontairement : les caracteres de dessin Unicode combines a
+rem  "chcp 65001" desynchronisent l'analyseur de cmd, qui se met alors a
+rem  executer les lignes du logo comme des commandes. La couleur passe par
+rem  des sequences ANSI, pas par des caracteres speciaux.
+
+rem  Recupere le caractere ESC (0x1B) pour les sequences ANSI
+for /f %%a in ('echo prompt $E ^| cmd') do set "E=%%a"
+
+rem  Meme palette que Optimisation-Windows.ps1
+set "ACC=%E%[38;2;139;124;246m"
+set "CYA=%E%[38;2;56;208;232m"
+set "TXT=%E%[38;2;226;232;240m"
+set "DIM=%E%[38;2;152;160;178m"
+set "FNT=%E%[38;2;98;107;126m"
+set "WRN=%E%[38;2;250;204;21m"
+set "BAD=%E%[38;2;248;113;113m"
+set "OKC=%E%[38;2;74;222;128m"
+set "B=%E%[1m"
+set "R=%E%[0m"
 
 if not exist "%~dp0Optimisation-Windows.ps1" (
+    cls
     echo.
-    echo   [ERREUR] Optimisation-Windows.ps1 est introuvable dans ce dossier.
-    echo   Garde SeanTweak.bat et Optimisation-Windows.ps1 cote a cote.
+    echo   %BAD%%B%^|%R%  %TXT%FICHIER MANQUANT%R%
     echo.
-    pause
+    echo   %DIM%Optimisation-Windows.ps1 est introuvable dans ce dossier.%R%
+    echo   %DIM%Garde SeanTweak.bat et Optimisation-Windows.ps1 cote a cote,%R%
+    echo   %DIM%exactement comme dans l'archive telechargee.%R%
+    echo.
+    echo   %FNT%Appuie sur une touche pour fermer.%R%
+    pause >nul
     exit /b 1
 )
 
 rem  Test d'elevation : fltmc echoue si on n'est pas administrateur
-rem  (plus rapide que net session)
 fltmc >nul 2>&1
 if %errorlevel% equ 0 goto run
 
 cls
 echo.
-echo   SEAN TWEAK  -  optimisation windows                            v2.0
-echo   --------------------------------------------------------------------
+echo   %ACC%%B%SEAN TWEAK%R%   %DIM%optimisation windows%R%                       %FNT%v2.0%R%
+echo   %FNT%--------------------------------------------------------------------%R%
 echo.
-echo   Sean Tweak modifie le registre et les services : les droits
-echo   administrateur sont necessaires.
+echo   %WRN%^|%R%  %TXT%Droits administrateur requis%R%
 echo.
-echo   Une fenetre de confirmation Windows va s'ouvrir.
+echo   %DIM%Sean Tweak ecrit dans le registre et modifie des services :%R%
+echo   %DIM%Windows n'autorise pas ces operations a un compte standard.%R%
+echo.
+echo   %CYA%^>%R%  %TXT%Une confirmation Windows va s'ouvrir.%R%
+echo   %FNT%   Accepte-la et Sean Tweak redemarre avec les droits necessaires.%R%
 echo.
 
-powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs -ErrorAction Stop } catch { exit 1 }"
+rem  On eleve cmd.exe (signe par Microsoft) qui rappelle ce .bat, plutot que
+rem  d'elever le .bat directement : ShellExecute sur un .bat telecharge
+rem  declenche l'avertissement "L'editeur n'a pas pu etre verifie".
+set "SELF=%~f0"
+powershell -NoProfile -Command "$q=[char]34; try { Start-Process -FilePath cmd.exe -ArgumentList '/c', ($q+$env:SELF+$q) -Verb RunAs -ErrorAction Stop } catch { exit 1 }"
 
 if %errorlevel% neq 0 (
-    echo   Elevation refusee : Sean Tweak n'a rien modifie.
+    cls
     echo.
-    echo   Pour reessayer : clic droit sur SeanTweak.bat, puis
-    echo   "Executer en tant qu'administrateur".
+    echo   %ACC%%B%SEAN TWEAK%R%   %DIM%optimisation windows%R%                       %FNT%v2.0%R%
+    echo   %FNT%--------------------------------------------------------------------%R%
     echo.
-    pause
+    echo   %WRN%^|%R%  %TXT%Elevation refusee%R%
+    echo.
+    echo   %OKC%   Aucune modification n'a ete faite sur ton systeme.%R%
+    echo.
+    echo   %DIM%Relance SeanTweak.bat et accepte la confirmation Windows,%R%
+    echo   %DIM%ou fais un clic droit ^> "Executer en tant qu'administrateur".%R%
+    echo.
+    echo   %FNT%Appuie sur une touche pour fermer.%R%
+    pause >nul
 )
 exit /b
 
 :run
 cls
 mode con: cols=110 lines=45
+echo.
+echo   %ACC%%B%SEAN TWEAK%R%   %DIM%optimisation windows%R%                       %FNT%v2.0%R%
+echo.
+echo   %FNT%Demarrage...%R%
 
 rem  PowerShell 7 (pwsh) si disponible, sinon Windows PowerShell 5.1
 where pwsh >nul 2>&1
@@ -58,9 +96,12 @@ if %errorlevel% equ 0 (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Optimisation-Windows.ps1"
 )
 
-if %errorlevel% neq 0 (
+set "CODE=%errorlevel%"
+if not "%CODE%"=="0" (
     echo.
-    echo   Le script s'est termine avec le code %errorlevel%.
+    echo   %BAD%^|%R%  %TXT%Le script s'est termine avec le code %CODE%.%R%
+    echo   %FNT%Journal : %%LOCALAPPDATA%%\TweakSean\tweaksean.log%R%
+    echo.
     pause
 )
 exit /b
