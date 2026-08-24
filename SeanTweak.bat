@@ -23,6 +23,9 @@ set "BAD=%E%[38;2;248;113;113m"
 set "OKC=%E%[38;2;74;222;128m"
 set "B=%E%[1m"
 set "R=%E%[0m"
+rem  masquage / retablissement du curseur clignotant
+set "HID=%E%[?25l"
+set "SHW=%E%[?25h"
 
 if not exist "%~dp0Optimisation-Windows.ps1" (
     cls
@@ -33,8 +36,9 @@ if not exist "%~dp0Optimisation-Windows.ps1" (
     echo   %DIM%Garde SeanTweak.bat et Optimisation-Windows.ps1 cote a cote,%R%
     echo   %DIM%exactement comme dans l'archive telechargee.%R%
     echo.
-    echo   %FNT%Appuie sur une touche pour fermer.%R%
+    echo   %FNT%Appuie sur une touche pour fermer.%R%%HID%
     pause >nul
+    echo %SHW%
     exit /b 1
 )
 
@@ -54,7 +58,7 @@ echo   %DIM%Windows n'autorise pas ces operations a un compte standard.%R%
 echo.
 echo   %CYA%^>%R%  %TXT%Une confirmation Windows va s'ouvrir.%R%
 echo   %FNT%   Accepte-la et Sean Tweak redemarre avec les droits necessaires.%R%
-echo.
+echo.%HID%
 
 rem  On eleve cmd.exe (signe par Microsoft) qui rappelle ce .bat, plutot que
 rem  d'elever le .bat directement : ShellExecute sur un .bat telecharge
@@ -75,8 +79,9 @@ if %errorlevel% neq 0 (
     echo   %DIM%Relance SeanTweak.bat et accepte la confirmation Windows,%R%
     echo   %DIM%ou fais un clic droit ^> "Executer en tant qu'administrateur".%R%
     echo.
-    echo   %FNT%Appuie sur une touche pour fermer.%R%
+    echo   %FNT%Appuie sur une touche pour fermer.%R%%HID%
     pause >nul
+    echo %SHW%
 )
 exit /b
 
@@ -86,7 +91,7 @@ mode con: cols=110 lines=45
 echo.
 echo   %ACC%%B%SEAN TWEAK%R%   %DIM%optimisation windows%R%                       %FNT%v2.0%R%
 echo.
-echo   %FNT%Demarrage...%R%
+echo   %FNT%Demarrage...%R%%HID%
 
 rem  PowerShell 7 (pwsh) si disponible, sinon Windows PowerShell 5.1
 where pwsh >nul 2>&1
@@ -96,7 +101,9 @@ if %errorlevel% equ 0 (
     powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Optimisation-Windows.ps1"
 )
 
+rem  capture du code AVANT tout echo : un echo remet errorlevel a 0
 set "CODE=%errorlevel%"
+echo %SHW%
 if not "%CODE%"=="0" (
     echo.
     echo   %BAD%^|%R%  %TXT%Le script s'est termine avec le code %CODE%.%R%
